@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body class="login-body">
+{% load static %}
+<link rel="stylesheet" href="{% static 'css/styles.css' %}">
+
+
+<div class="login-div">
+    <div class="login-div-error">
+        <div class="login-error">
+            {% if form.errors %}
+            <p>Prisijungimo klaida, bandykite dar kartą!</p>
+            {% endif %}
+    
+            {% if next %}
+            {% if user.is_authenticated %}
+            <p>Neturite prieigos prie šios informacijos. Turite prisijungti.</p>
+    
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    <h1 class="login-h1">Prisijunkite</h1>
+    <h3 class="login-h3">Buy High Sell Low</h3>
+    <form method="post" action="{% url 'login' %}">
+        {% csrf_token %}
+            <table class="login-namemail">
+                <tr>
+                    <td>Vartotojas: </td>
+                    <td>{{ form.username }}</td>
+                </tr>
+                <tr>
+                    <td>Slaptažodis: </td>
+                    <td>{{ form.password }}</td>
+                </tr>
+            </table>
+        <input type="submit" value="Prisijungti" class="login-submit"/>
+        <input type="hidden" name="next" value="{{ next }}" />
+    </form>
+    <p><a href="" class="login-redirect">Pamiršote slaptažodį?</a></p>
+    <p><a href="{% url 'register' %}" class="login-redirect">Registruotis</a></p>
+</div>
+
+
+</body>
+</html>

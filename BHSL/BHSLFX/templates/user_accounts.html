@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+    <h1>Mano paskyros</h1>
+{% if useraccount_list %}
+    {% for useraccount in useraccount_list %}
+            <hr>
+            <ul>
+                <li>
+                    <p><strong>Paskyros numeris: </strong>{{ useraccount.account_number }}</p>
+                    <p><strong>Serveris: </strong>{{ useraccount.server }}</p>
+                </li>
+                <br/>
+                <a href="http://127.0.0.1:8000/BHSLFX/myaccounts/{{ useraccount.id }}">
+                    <button class="button-sellect">Pasirinkti</button>
+                </a>
+            </li>
+        </ul>
+    {% endfor %}
+<a href="myaccounts/new">
+    <button class="login-submit" >Pridėti</button>
+</a><br>
+{% else %}
+    <p>Paskirų neturite</p>
+    <a href="myaccounts/new">
+        <button class="login-submit">Pridėti</button>
+    </a>
+{% endif %}
+{% endblock %}

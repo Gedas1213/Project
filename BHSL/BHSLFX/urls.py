@@ -6,6 +6,6 @@ urlpatterns = [
     path('register', views.register, name="register"),
     path('myaccounts', views.MyAccounts.as_view(), name='myaccounts'),
     path('myaccounts/new', views.UsersAccountListView.as_view(), name='add_account'),
-    path('myaccounts/<int:pk>', views.Bot.as_view(), name='bot'),
-    path("botbot", views.Botbot.as_view(), name="next_page"),
+    path('myaccounts/<int:pk>', views.CurrencyData.as_view(), name='bot'),
+    path("botbot", views.Bot.as_view(), name="next_page"),
 ]

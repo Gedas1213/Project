@@ -13,6 +13,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views import generic
 from .models import UserAccount
 from .forms import CurrencyPair
+import pandas as pd
 
 # Create your views here.
 
@@ -105,9 +106,9 @@ class MyAccounts(LoginRequiredMixin, generic.ListView):
 
     
 
-class Bot(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixin):
+class CurrencyData(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixin):
     model = UserAccount
-    template_name = 'bot.html'
+    template_name = 'currency_data.html'
     form_class = CurrencyPair
     scuscess_url = 'http://127.0.0.1:8000/BHSLFX/'
     
@@ -128,8 +129,10 @@ class Bot(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixin):
 
         account_info = mt.account_info()
         balance = account_info.balance
+        status = mt.terminal_info().connected
        
         context['balance'] = balance
+        context['status'] = status
         return context
     
   
@@ -144,21 +147,23 @@ class Bot(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixin):
             
             return HttpResponseRedirect('http://127.0.0.1:8000/BHSLFX/botbot')
 
-    
 
-class Botbot(generic.CreateView):
+
+
+from dateutil.relativedelta import relativedelta
+
+class Bot(generic.CreateView):
     model = UserAccount
-    template_name = 'botbot.html'
+    template_name = 'bot.html'
 
     def get(self, request):
         currency_pair = request.session.get('currency_pair', None)
         time_frame = request.session.get('time_frame', None)
         if currency_pair is not None:
+            get_data = pd.DataFrame(mt.copy_rates_range(currency_pair, 
+                               int(time_frame), 
+                               (datetime.datetime.now()-relativedelta(years=20)), 
+                                datetime.datetime.now()))
+            print(get_data)
             context = {'currency_pair': currency_pair, 'time_frame': time_frame}
             return render(request, self.template_name, context)
-        
-        print (currency_pair)
-        
-        # return HttpResponse(time_frame)
-    
-

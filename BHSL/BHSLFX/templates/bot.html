@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% load static %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div>
+    <h3><strong>Paskyros numeris: </strong>{{ useraccount.account_number }} </h3>
+    <p><strong>Serveris: </strong>{{ useraccount.server }}</p>
+</div>
+    <div class="container p-3 my-3 bg-dark text-white">
+        <p><strong>Sąskaitos balansas: </strong>{{balance}}</p>
+        <form method="POST" action="">
+            {% csrf_token %}
+            {{ form|crispy }}
+            <button type="submit">Pasirinkti</button>
+        </form>
+    </div>
+<hr>
+{% endblock %}
+

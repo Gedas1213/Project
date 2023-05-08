@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% load static %}
+
+<div class="container-fluid">
+    <h3>Ekonominis kalendorius:</h3>
+    <table class="table table-striped table-dark table-hover">
+        <caption>Atnaujinta: {{update_time}}</caption>
+        <thead class="thead-dark">
+            <strong>
+                <td><strong>Data</strong></td>
+                <td><strong>Valstybė</strong></td>
+                <td><strong>Kategorija</strong></td>
+                <td><strong>Šaltinis</strong></td>
+                <td><strong>Rezultatas</strong></td>
+                <td><strong>Buvęs rezultatas</strong></td>
+                <td><strong>Prognozė</strong></td>
+            </strong>
+        </thead>
+        <tbody> 
+        {% for i in df_conv %}
+            <tr>
+                <td>{{i.Date}}</td>
+                <td>{{i.Country}}</td>
+                <td>{{i.Category}}</td>
+                <td>{{i.SourceURL}}</td>
+                <td>{{i.Actual}}</td>
+                <td>{{i.Previous}}</td>
+                <td>{{i.Forecast}}</td>
+            </tr>
+        {% endfor %}
+    </table>
+</div>
+    
+
+{% endblock %}

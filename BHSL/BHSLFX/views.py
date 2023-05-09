@@ -151,10 +151,22 @@ class CurrencyData(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixi
 
 
 from dateutil.relativedelta import relativedelta
+import ta
+from ta.utils import dropna
+# import torch
+# import pygad.torchga
+# import pygad
+
+
 
 class Bot(generic.CreateView):
     model = UserAccount
     template_name = 'bot.html'
+
+    def __init__(self):
+        super().__init__()
+        self.df = None
+        self.currency_pair = None
 
     def get(self, request):
         currency_pair = request.session.get('currency_pair', None)
@@ -164,6 +176,26 @@ class Bot(generic.CreateView):
                                int(time_frame), 
                                (datetime.datetime.now()-relativedelta(years=20)), 
                                 datetime.datetime.now()))
-            print(get_data)
+
+
+            get_data['time'] = pd.to_datetime(get_data['time'], unit="s")
+
+            get_data['EMA'] = ta.trend.ema_indicator(get_data['close'], 21)
+            get_data['RSI'] = ta.momentum.rsi(get_data['close'], 14)
+            get_data.fillna(0, inplace=True)
+            get_data.set_index('time', inplace=True)
+            df = get_data.drop(['real_volume', 'spread'], axis=1)
+
+            print((df))
+
             context = {'currency_pair': currency_pair, 'time_frame': time_frame}
             return render(request, self.template_name, context)
+    
+    
+    # def get_context_data(self, **kwargs):
+    #     context = super().get_context_data(**kwargs)
+    #     context['a'] = self.currency_pair
+    #     return context
+    
+    
+    # def fitness_func(solution, ):

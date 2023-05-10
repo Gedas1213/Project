@@ -17,20 +17,6 @@ TIME_GAP_CHOICES = (
     (mt.TIMEFRAME_D1, "1 day"),
 )
 
-# TIME_GAP_CHOISES = (
-#     ("mt.TIMEFRAME_M15", "15 min"),
-#     ("mt.TIMEFRAME_M20", "20 min"),
-#     ("mt.TIMEFRAME_M30", "30 min"),
-#     ("mt.TIMEFRAME_H1", "1 hour"),
-#     ("mt.TIMEFRAME_H2", "2 hour"),
-#     ("mt.TIMEFRAME_H3", "3 hour"),
-#     ("mt.TIMEFRAME_H4", "4 hour"),
-#     ("mt.TIMEFRAME_H6", "6 hour"),
-#     ("mt.TIMEFRAME_H8", "8 hour"),
-#     ("mt.TIMEFRAME_H12", "12 hour"),
-#     ("mt.TIMEFRAME_D1", "1 day"),
-# )
-
 class AccountCreateForm(forms.ModelForm):
     class Meta:
         model = UserAccount

@@ -156,8 +156,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import pygad.torchga
-# import pygad
-
+from torch.nn.utils import early_stopping
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler
 
 
 class Bot(generic.CreateView):
@@ -190,7 +191,23 @@ class Bot(generic.CreateView):
 
             context = {'currency_pair': currency_pair, 'time_frame': time_frame, 'df':df}
             return render(request, self.template_name, context)
+        
+    #PyTorch modelis
+    class Model(nn.Module):
+        def __init__(self):
+            super(Model, self).__init__() 
+            self.sequential = nn.Sequential(
+                nn.Linear(2, 1),
+                nn.ReLU(),
+                nn.Linear(2, 1)
+        )
+
+        def forward(self, x):
+            return self.sequential(x)
     
+    #create an initial population of solutions to the PyTorch model
+    torch_ga = pygad.torchga.TorchGA(model = Model, num_solutions=4)
+
     
     def fitness_function(self, solution: np.ndarray) -> Tuple[float, np.ndarray]:
 
@@ -222,43 +239,100 @@ class Bot(generic.CreateView):
         signals[hold_signals] = 0
 
         #prep data for the training and validating
+        scailer = StandardScaler()
         X_df = self.df[['EMA', 'RSI']].values
         train_size = int(0.8 * len(X_df))
         X_train, X_val = X_df[:train_size], X_df[train_size:]
         Y_train, Y_val = signals[:train_size], signals[train_size:]
+        X_train = scailer.fit_transform(X_train)
+        X_val = scailer.transform(X_val)
+
 
         X_train, Y_train = torch.Tensor(X_train), torch.Tensor(Y_train)
         X_val, Y_val = torch.Tensor(X_val), torch.Tensor(Y_val)
+                       
+        return fitness, X_train, Y_train, X_val, Y_val, signals
+    
+    class TradingDataset(Dataset):
+        def __init__(self, X, Y):
+            self.X = X
+            self.Y = Y
 
-        return fitness, X_train, Y_train, X_val, Y_val
+        def __getitem__(self, index):
+            return self.X[index], self.Y[index]
 
+        def __len__(self):
+            return len(self.X)
+            
+    model = Model()
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    train_dataset = TradingDataset(X_train, Y_train)
+    batch_size = 32
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    def train_function(model, train_loader, val_loader, optimizer, patience=10):
+        early_stopping_monitor = early_stopping.EarlyStopping(patience=patience)
+
+           #Loss funkcija
+        def loss_function(outputs, signals):
+            trades = torch.cumsum(outputs, dim=0)
+            returns = torch.cumprod(1 + (trades * signals), dim=0)
+            roi = returns[-1]
+            return -roi
+
+        best_val_loss = float('inf')
+        for epoch in range(100):
+            model.train()
+            for i, (inputs, signals) in enumerate(train_loader):
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = loss_function(outputs, signals)
+                loss.backward()
+                optimizer.step()
+
+            model.eval()
+            with torch.no_grad():
+                total_loss = 0
+                for inputs, signals in val_loader:
+                    outputs = model(inputs)
+                    loss = loss_function(outputs, signals)
+                    total_loss += loss.item() * inputs
         
+        return best_val_loss
 
-    #PyTorch modelis
-    class Model(nn.Module):
-        def __init__(self):
-            super(Model, self).__init__() 
-            self.sequential = nn.Sequential(
-                nn.Linear(2, 1),
-                nn.ReLU(),
-                nn.Linear(2, 1)
-            )
-
-        def forward(self, x):
-            return self.sequential(x)
-        
-    # model = Model()
-    # state_dict = model.state_dict()
-    # optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-
-    #Loss funkcija
-    def loss_function(outputs, targets):
-        trades = torch.cumsum(outputs, dim=0)
-        returns = torch.cumprod(1 + (trades * targets), dim=0)
-        roi = returns[-1]
-        return -roi
-
-    #create an initial population of solutions to the PyTorch model
-    torch_ga = pygad.torchga.TorchGA(model = Model, num_solutions=4)
+    num_generations = 200 #can vary between 50 - 10 000
+    num_parents_mating = 2 #starting point 10 - 20% of the population
+    initial_population = np.random.randn(4, 4) #should be equal to the num_solutions parameter 
+    sol_per_pop = 4
+    num_genes = 4 #the number of parameters to be optimized in the solution
+    mutation_percent_genes = 10 #percentage of genes that will be randomly mutated in each offspring
+    parent_selection_type = 'rws'
+    crossover_type = "single_point"
+    mutation_type = "random"
+    keep_parents = True
 
 
+    ga_instance = pygad.GA(num_generations=num_generations,
+                       num_parents_mating=num_parents_mating,
+                       fitness_function=fitness_function,
+                       sol_per_pop=sol_per_pop,
+                       num_genes=num_genes,
+                       mutation_percent_genes=mutation_percent_genes,
+                       initial_population=initial_population,
+                       parent_selection_type=parent_selection_type,
+                       crossover_type=crossover_type,
+                       mutation_type=mutation_type,
+                       keep_parents=keep_parents)
+    
+    ga_instance.run()
+
+    ga_instance.plot_fitness(title="PyGAD & PyTorch - Iteration vs. Fitness", linewidth=4) #for algo quality checking
+    
+
+    solution, solution_fitness, solution_idx = ga_instance.best_solution()
+
+    predictions = pygad.torchga.predict(model=model,
+                                    solution=solution,
+                                    data=X_val)
+    
+    print("Predictions : \n", predictions.detach().numpy())

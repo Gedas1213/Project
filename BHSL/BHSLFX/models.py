@@ -1,13 +1,14 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.urls import reverse
+from .forms import *
 
 # Create your models here.
 
 
 class UserAccount(models.Model):
     account_number = models.IntegerField()
-    account_password = models.CharField(max_length=50)
+    account_password = models.CharField(widget=forms.PasswordInput)
     server = models.CharField(max_length=100)
     owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
 

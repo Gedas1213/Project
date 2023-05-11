@@ -26,3 +26,11 @@ class AccountCreateForm(forms.ModelForm):
 class CurrencyPair(forms.Form):
     currency_pair = forms.CharField(max_length=6)
     time_frame = forms.ChoiceField(choices=TIME_GAP_CHOICES)
+
+
+class UserForm(forms.ModelForm):
+    class Meta:
+        model = UserAccount
+        widgets = {
+        'password': forms.PasswordInput(),
+    }

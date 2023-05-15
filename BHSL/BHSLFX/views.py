@@ -197,14 +197,15 @@ class Bot(generic.CreateView):
 bot = Bot()
 df = bot.get_df()
         
-    #PyTorch modelis
+#     #PyTorch modelis
 class GaModel(nn.Module):
     def __init__(self):
         super(GaModel, self).__init__() 
         self.sequential = nn.Sequential(
             nn.Linear(2, 4),
             nn.ReLU(),
-            nn.Linear(4, 1)
+            nn.Linear(4, 1),
+            nn.Tanh()
         )
 
     def forward(self, x):
@@ -214,11 +215,11 @@ model = GaModel()
 # state_dict = model.state_dict()
 
 #create an initial population of solutions to the PyTorch model
-torch_ga = pygad.torchga.TorchGA(model = model, num_solutions=4)
+in_pop = pygad.torchga.TorchGA(model = model, num_solutions=4)
 
 
 
-def fitness_function(solution: np.ndarray) -> Tuple[float, np.ndarray]:
+def fitness_function(solution: np.ndarray, df) -> Tuple[float, np.ndarray]:
 
     ema_period = int(solution[0])
     rsi_period = int(solution[1])
@@ -262,9 +263,10 @@ def fitness_function(solution: np.ndarray) -> Tuple[float, np.ndarray]:
 
     X_train, Y_train = torch.Tensor(X_train), torch.Tensor(Y_train)
     X_val, Y_val = torch.Tensor(X_val), torch.Tensor(Y_val)
+        
+    return fitness, signals, X_train, Y_train, X_val, Y_val
 
-                    
-    return fitness, signals
+fitness, signals, X_train, Y_train, X_val, Y_val = fitness_function(solution, df)
 
 
 class TradingDataset(Dataset):

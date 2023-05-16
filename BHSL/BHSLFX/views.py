@@ -195,7 +195,11 @@ class Bot(generic.CreateView):
         return self.df
     
 bot = Bot()
-df = bot.get_df()
+df = None
+def initialize_data():
+    global df  
+    df = bot.get_df()
+# df = bot.get_df()
         
 #     #PyTorch modelis
 class GaModel(nn.Module):
@@ -217,9 +221,9 @@ model = GaModel()
 #create an initial population of solutions to the PyTorch model
 in_pop = pygad.torchga.TorchGA(model = model, num_solutions=4)
 
+def fitness_function(ga_instance, solution: np.ndarray, solution_idx) -> Tuple[float, np.ndarray]:
 
-
-def fitness_function(solution: np.ndarray, df) -> Tuple[float, np.ndarray]:
+    global df
 
     ema_period = int(solution[0])
     rsi_period = int(solution[1])
@@ -263,10 +267,12 @@ def fitness_function(solution: np.ndarray, df) -> Tuple[float, np.ndarray]:
 
     X_train, Y_train = torch.Tensor(X_train), torch.Tensor(Y_train)
     X_val, Y_val = torch.Tensor(X_val), torch.Tensor(Y_val)
-        
-    return fitness, signals, X_train, Y_train, X_val, Y_val
 
-fitness, signals, X_train, Y_train, X_val, Y_val = fitness_function(solution, df)
+        
+    return fitness, signals
+
+
+# fitness, signals, X_train, Y_train, X_val, Y_val = fitness_function(solution, df)
 
 
 class TradingDataset(Dataset):
@@ -281,49 +287,49 @@ class TradingDataset(Dataset):
         return len(self.X)
         
 optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-train_dataset = TradingDataset(X_train, Y_train)
-batch_size = 32
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+# train_dataset = TradingDataset(X_train, Y_train)
+# batch_size = 32
+# train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-def train_function(model, train_loader, val_loader, optimizer, patience=10):
+# def train_function(model, train_loader, val_loader, optimizer, patience=10):
     
-        #Loss funkcija
-    def loss_function(outputs, signals):
-        trades = torch.cumsum(outputs, dim=0)
-        returns = torch.cumprod(1 + (trades * signals), dim=0)
-        roi = returns[-1]
-        return -roi
+#         #Loss funkcija
+#     def loss_function(outputs, signals):
+#         trades = torch.cumsum(outputs, dim=0)
+#         returns = torch.cumprod(1 + (trades * signals), dim=0)
+#         roi = returns[-1]
+#         return -roi
 
-    best_val_loss = float('inf')
-    for epoch in range(100):
-        model.train()
-        for i, (inputs, signals) in enumerate(train_loader):
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = loss_function(outputs, signals)
-            loss.backward()
-            optimizer.step()
+#     best_val_loss = float('inf')
+#     for epoch in range(100):
+#         model.train()
+#         for i, (inputs, signals) in enumerate(train_loader):
+#             optimizer.zero_grad()
+#             outputs = model(inputs)
+#             loss = loss_function(outputs, signals)
+#             loss.backward()
+#             optimizer.step()
 
-        model.eval()
-        with torch.no_grad():
-            total_loss = 0
-            for inputs, signals in val_loader:
-                outputs = model(inputs)
-                loss = loss_function(outputs, signals)
-                total_loss += loss.item() * inputs
+#         model.eval()
+#         with torch.no_grad():
+#             total_loss = 0
+#             for inputs, signals in val_loader:
+#                 outputs = model(inputs)
+#                 loss = loss_function(outputs, signals)
+#                 total_loss += loss.item() * inputs
 
-            # Check for early stopping
-        if total_loss < best_val_loss:
-            best_val_loss = total_loss
-            num_epochs_no_improvement = 0
-        else:
-            num_epochs_no_improvement += 1
+#             # Check for early stopping
+#         if total_loss < best_val_loss:
+#             best_val_loss = total_loss
+#             num_epochs_no_improvement = 0
+#         else:
+#             num_epochs_no_improvement += 1
         
-        if num_epochs_no_improvement >= patience:
-            print(f'Validation loss did not improve for {patience} epochs. Stopping early.')
-            break
+#         if num_epochs_no_improvement >= patience:
+#             print(f'Validation loss did not improve for {patience} epochs. Stopping early.')
+#             break
     
-    return best_val_loss
+#     return best_val_loss
 
 num_generations = 200 #can vary between 50 - 10 000
 num_parents_mating = 2 #starting point 10 - 20% of the population
@@ -334,12 +340,12 @@ mutation_percent_genes = 10 #percentage of genes that will be randomly mutated i
 parent_selection_type = 'rws'
 crossover_type = "single_point"
 mutation_type = "random"
-keep_parents = True
+keep_parents = -1
 
 
 ga_instance = pygad.GA(num_generations=num_generations,
                     num_parents_mating=num_parents_mating,
-                    fitness_function=fitness_function,
+                    fitness_func=fitness_function,
                     sol_per_pop=sol_per_pop,
                     num_genes=num_genes,
                     mutation_percent_genes=mutation_percent_genes,

@@ -158,48 +158,45 @@ import torch.optim as optim
 import pygad.torchga
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
+import os
 
+directory = 'data'
+os.makedirs(directory, exist_ok=True)
 
 class Bot(generic.CreateView):
     model = UserAccount
     template_name = 'bot.html'
 
-    def __init__(self):
-        super().__init__()
-        self.df = None
-
     def get(self, request):
         currency_pair = request.session.get('currency_pair', None)
         time_frame = request.session.get('time_frame', None)
+        years = 20
+        if time_frame == '16385':
+             years = 11
+        elif time_frame == '30':
+            years = 5
+        elif time_frame == '20':
+            years = 3
+        elif time_frame == '15':
+            years = 2
+
         if currency_pair is not None:
             get_data = pd.DataFrame(mt.copy_rates_range(currency_pair, 
                                int(time_frame), 
-                               (datetime.datetime.now()-relativedelta(years=20)), 
+                               (datetime.datetime.now()-relativedelta(years=years)), 
                                 datetime.datetime.now()))
 
 
-            get_data['time'] = pd.to_datetime(get_data['time'], unit="s")
-
+            get_data['time'] = pd.to_datetime(get_data['time'], unit='s')
             get_data['returns'] = (get_data['close'] / get_data['close'].shift(1))-1
             get_data.fillna(0, inplace=True)
-            get_data.set_index('time', inplace=True)
             df = get_data.drop(['real_volume', 'spread'], axis=1)
 
-
-            print((df))
-
-            context = {'currency_pair': currency_pair, 'time_frame': time_frame, 'df':df}
+            df.to_csv('data\instument_data.csv', index=False)
+            
+            context = {'currency_pair': currency_pair, 'time_frame': time_frame}
             return render(request, self.template_name, context)
-        
-    def get_df(self):
-        return self.df
-    
-bot = Bot()
-df = None
-def initialize_data():
-    global df  
-    df = bot.get_df()
-# df = bot.get_df()
+
         
 #     #PyTorch modelis
 class GaModel(nn.Module):
@@ -216,77 +213,79 @@ class GaModel(nn.Module):
         return self.sequential(x)
 
 model = GaModel()
-# state_dict = model.state_dict()
 
-#create an initial population of solutions to the PyTorch model
-in_pop = pygad.torchga.TorchGA(model = model, num_solutions=4)
+# #create an initial population of solutions to the PyTorch model
+initial_population = pygad.torchga.TorchGA(model = model, num_solutions=4)
 
-def fitness_function(ga_instance, solution: np.ndarray, solution_idx) -> Tuple[float, np.ndarray]:
 
-    global df
+# def fitness_function(ga_instance, solution: np.ndarray, solution_idx) -> Tuple[float, np.ndarray]:
 
-    ema_period = int(solution[0])
-    rsi_period = int(solution[1])
-    buy_treshold = int(solution[2])
-    sell_treshold = int(solution[3])
+#     df = pd.read_csv(file_path)
 
-    df['EMA'] = ta.trend.ema_indicator(df['close'], ema_period)
-    df['RSI'] = ta.momentum.rsi(df['close'], rsi_period)
+#     ema_period = max(int(solution[0]), 1)
+#     rsi_period = max(int(solution[1]), 1)
+#     buy_treshold = int(solution[2])
+#     sell_treshold = int(solution[3])
+
+#     df['EMA'] = ta.trend.ema_indicator(df['close'], ema_period)
+#     df['RSI'] = ta.momentum.rsi(df['close'], rsi_period)
     
-    buy_signals = (df['close']>df['EMA'] & (df['RSI']<buy_treshold))
-    sell_signals = (df['RSI']>sell_treshold)
-    hold_signals = ~(buy_signals | sell_signals)
-    buy_signals = buy_signals & ~hold_signals
-    sell_signals = sell_signals & ~hold_signals
+#     buy_signals = (df['close'] > df['EMA']) & (df['RSI']<buy_treshold)
+#     sell_signals = (df['RSI']>sell_treshold)
+#     hold_signals = ~(buy_signals | sell_signals)
+#     buy_signals = buy_signals & ~hold_signals
+#     sell_signals = sell_signals & ~hold_signals
 
 
-    trades = np.zeros(len(df))
-    trades[buy_signals] = 1
-    trades[sell_signals] = -1
-    pnl = (trades * df['returns']).cumsum().iloc[-1]
+#     trades = np.zeros(len(df))
+#     trades[buy_signals] = 1
+#     trades[sell_signals] = -1
+#     pnl = (trades * df['returns']).cumsum().iloc[-1]
 
-    fitness = pnl / df['close'].iloc[0]
+#     fitness = pnl / df['close'].iloc[0]
 
-    signals = np.zeros(len(df))
-    signals[buy_signals] = 1
-    signals[sell_signals] = -1
-    signals[hold_signals] = 0
+#     signals = np.zeros(len(df))
+#     signals[buy_signals] = 1
+#     signals[sell_signals] = -1
+#     signals[hold_signals] = 0
 
     #prep data for the training and validating
 
-    scailer = StandardScaler()
-    X_df = df[['EMA', 'RSI']].values
-    train_size = int(0.8 * len(X_df))
+    # scailer = StandardScaler()
+    # X_df = df[['EMA', 'RSI']].values
+    # train_size = int(0.8 * len(X_df))
 
-    X_train, X_val = X_df[:train_size], X_df[train_size:]
-    Y_train, Y_val = signals[:train_size], signals[train_size:]
+    # X_train, X_val = X_df[:train_size], X_df[train_size:]
+    # Y_train, Y_val = signals[:train_size], signals[train_size:]
     
-    X_train = scailer.fit_transform(X_train)
-    X_val = scailer.transform(X_val)
+    # X_train = scailer.fit_transform(X_train)
+    # X_val = scailer.transform(X_val)
 
 
-    X_train, Y_train = torch.Tensor(X_train), torch.Tensor(Y_train)
-    X_val, Y_val = torch.Tensor(X_val), torch.Tensor(Y_val)
 
-        
-    return fitness, signals
+       
+    # return fitness, signals
 
 
 # fitness, signals, X_train, Y_train, X_val, Y_val = fitness_function(solution, df)
 
+# X_train, Y_train = torch.Tensor(X_train), torch.Tensor(Y_train)
+# X_val, Y_val = torch.Tensor(X_val), torch.Tensor(Y_val)
+# signals = torch.Tensor(signals, dtype=torch.float32)
 
-class TradingDataset(Dataset):
-    def __init__(self, X, Y):
-        self.X = X
-        self.Y = Y
 
-    def __getitem__(self, index):
-        return self.X[index], self.Y[index]
+# class TradingDataset(Dataset):
+#     def __init__(self, X, Y):
+#         self.X = X
+#         self.Y = Y
 
-    def __len__(self):
-        return len(self.X)
+#     def __getitem__(self, index):
+#         return self.X[index], self.Y[index]
+
+#     def __len__(self):
+#         return len(self.X)
         
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+# optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 # train_dataset = TradingDataset(X_train, Y_train)
 # batch_size = 32
 # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -343,27 +342,27 @@ mutation_type = "random"
 keep_parents = -1
 
 
-ga_instance = pygad.GA(num_generations=num_generations,
-                    num_parents_mating=num_parents_mating,
-                    fitness_func=fitness_function,
-                    sol_per_pop=sol_per_pop,
-                    num_genes=num_genes,
-                    mutation_percent_genes=mutation_percent_genes,
-                    initial_population=initial_population,
-                    parent_selection_type=parent_selection_type,
-                    crossover_type=crossover_type,
-                    mutation_type=mutation_type,
-                    keep_parents=keep_parents)
+# ga_instance = pygad.GA(num_generations=num_generations,
+#                     num_parents_mating=num_parents_mating,
+#                     fitness_func=fitness_function,
+#                     sol_per_pop=sol_per_pop,
+#                     num_genes=num_genes,
+#                     mutation_percent_genes=mutation_percent_genes,
+#                     initial_population=initial_population,
+#                     parent_selection_type=parent_selection_type,
+#                     crossover_type=crossover_type,
+#                     mutation_type=mutation_type,
+#                     keep_parents=keep_parents, )
 
-ga_instance.run()
+# ga_instance.run()
 
-ga_instance.plot_fitness(title="PyGAD & PyTorch - Iteration vs. Fitness", linewidth=4) #for algo quality checking
+# ga_instance.plot_fitness(title="PyGAD & PyTorch - Iteration vs. Fitness", linewidth=4) #for algo quality checking
 
 
-solution, solution_fitness, solution_idx = ga_instance.best_solution()
+# solution, solution_fitness, solution_idx = ga_instance.best_solution()
 
-predictions = pygad.torchga.predict(model=model,
-                                solution=solution,
-                                data=X_val)
+# predictions = pygad.torchga.predict(model=model,
+#                                 solution=solution,
+#                                 data=X_val)
 
-print("Predictions : \n", predictions.detach().numpy())
+# print("Predictions : \n", predictions.detach().numpy())

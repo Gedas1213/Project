@@ -137,5 +137,8 @@ span.weak {
     margin-top: 5px;
 }
 
-
-
+.white-line{
+    border-bottom: #FFFFFF 5px solid;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+}

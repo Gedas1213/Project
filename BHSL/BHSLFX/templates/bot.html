@@ -2,9 +2,108 @@
 {% load static %}
 {% load crispy_forms_tags %}
 {% block content %}
-
-<div class="container">
+<div class="container p-3 my-3 bg-dark text-white">
     <h1>{{ currency_pair }}</h1>
+    <div class="white-line">
+        {% if time_frame == "16408" %}
+            <p class="text-muted"><strong>Periodas: </strong> 1 diena </p>
+        {% elif time_frame == "16396" %}
+            <p class="text-muted"><strong>Periodas: </strong> 12 valandų </p>
+        {% elif time_frame == "16392" %}
+            <p class="text-muted"><strong>Periodas: </strong> 8 valandos </p>
+        {% elif time_frame == "16390" %}
+            <p class="text-muted"><strong>Periodas: </strong> 6 valandos </p>
+        {% elif time_frame == "16388" %}
+            <p class="text-muted"><strong>Periodas: </strong> 4 valandos </p>
+        {% elif time_frame == "16386" %}
+            <p class="text-muted"><strong>Periodas: </strong> 2 valandos </p>
+        {% elif time_frame == "16385" %}
+            <p class="text-muted"><strong>Periodas: </strong> 1 valanda </p>
+        {% else %}
+            <p class="text-muted"><strong>Periodas: <strong> {{ time_frame }} min.</strong> </h4>
+        {% endif %}
+    </div>
+    <p><strong>Balansas: </strong>{{ balance }}</p>
+    <p><strong> Laisvos lėšos: </strong> {{ margin_free }}</p>
+</div>
+<div class="container p-3 my-3 bg-dark text-white" id="action_update">
+    <h5>Tikimybės:</h5>
+    <p>{{ output|safe }}</p>
+    <h3 style="text-align:center" id="action">{{ action }}</h3>
+</div>
+<div class="container p-3 my-3 bg-dark text-white">
+    {% if not positions_active %}
+        <p>Neturite atvirų pozicijų</p>
+    {% else %}
+    <table>
+        <thead> 
+            <tr>
+                <th>Ticket</th>
+                <th>Symbol</th>
+                <th>Type</th>
+                <th>Volume</th>
+                <th>Open Price</th>
+                <th>Current Price</th>
+                <th>Profit</th>
+                <th>Swap</th>
+                <th>Commission</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for position in positions_active %}
+            <tr>
+                <td>{{ position.ticket }}</td>
+                <td>{{ position.symbol }}</td>
+                <td>{{ position.type }}</td>
+                <td>{{ position.volume }}</td>
+                <td>{{ position.price_open }}</td>
+                <td>{{ position.price_current }}</td>
+                <td>{{ position.profit }}</td>
+                <td>{{ position.swap }}</td>
+                <td>{{ position.commission }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form method="POST" action="{% url 'close_all_positions' %}">
+        {% csrf_token %}
+        <button class="btn btn-danger" type="submit">Uždaryti visas pozicijas</button>
+    </form>
+    {% endif %}
 </div>
 
+<script>
+    function action_color() {
+        var element = document.getElementById("action");
+        var actionValue = "{{ action }}"
+
+            if (actionValue === 'PERKA') {
+                element.style.color = "#17F181";
+            } else if (actionValue === 'PARDUODA'){
+                element.style.color = "orange";
+            } else if (actionValue === 'LAIKO'){
+                element.style.color = "#75EBFD"
+            } else {
+                element.style.color = "#ff0000"
+            }
+    }
+
+    var time_frame = '{{ time_frame_min }}'; 
+
+    var now = new Date();
+    var minutes = now.getMinutes();
+    var delay = (time_frame - (minutes % time_frame)) * 60 * 1000;
+
+    setTimeout(function() {
+        location.reload();
+
+        setInterval(function() {
+            location.reload();
+        }, time_frame * 60 * 1000);
+    }, delay);
+
+window.onload = function(){
+    action_color();
+}
+</script>
 {% endblock %}

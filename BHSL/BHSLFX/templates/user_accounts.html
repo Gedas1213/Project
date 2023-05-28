@@ -13,6 +13,9 @@
                 <a href="http://127.0.0.1:8000/BHSLFX/myaccounts/{{ useraccount.id }}">
                     <button class="button-sellect">Pasirinkti</button>
                 </a>
+                <a href="{% url 'useraccount_delete' useraccount.id %}">
+                    <button class="button-sellect">Trinti</button>
+                </a>
             </li>
         </ul>
     {% endfor %}

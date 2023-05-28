@@ -9,11 +9,24 @@ from django.http import HttpResponseRedirect
 import datetime as datetime
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views import generic
+from django.urls import reverse_lazy
 from .models import UserAccount
 from .forms import CurrencyPair
 import pandas as pd
+import torch
+import pygad.torchga
+import pygad
+import torch.nn as nn
+import numpy as np
+import ta
+from dateutil.relativedelta import relativedelta
+import os
+import logging
+
 
 # Create your views here.
+
+path = 'data\model.pth'
 
 def index(request):
     us_calendar=te.getCalendarData(country=['united states'], initDate=datetime.datetime.today().strftime("%Y-%m-%d"), endDate=datetime.datetime.today().strftime("%Y-%m-%d"), importance='3', output_type='df')
@@ -80,6 +93,40 @@ def register(request):
         return redirect('login')
     return render(request, 'register.html')
 
+def close_all_positions(request):
+    if request.method == 'POST':
+        positions = mt.positions_get() 
+
+        if positions is None or len(positions) == 0:
+            logging.critical("No positions found, error code = %s", mt.last_error())
+        else:
+            for position in positions:
+                symbol = position.symbol
+                volume = position.volume
+                action_type = mt.TRADE_ACTION_DEAL
+                position_type = mt.ORDER_TYPE_SELL if position.type == mt.ORDER_TYPE_BUY else mt.ORDER_TYPE_BUY
+
+                close_order = {
+                    "action": action_type,
+                    "symbol": symbol,
+                    "volume": volume,
+                    "type": position_type,
+                    "position": position.ticket,
+                    "price": mt.symbol_info_tick(symbol).ask if position.type == mt.ORDER_TYPE_BUY else mt.symbol_info_tick(symbol).bid,
+                    "magic": 234000,
+                    "deviation": 20,
+                    "comment": "python script close",
+                    "type_time": mt.ORDER_TIME_GTC,
+                    "type_filling": mt.ORDER_FILLING_IOC,
+                }
+
+                result = mt.order_send(close_order)
+
+                if result.retcode != mt.TRADE_RETCODE_DONE:
+                    logging.critical("Failed to close position with ticket #:", position.ticket, ". Error code =", result.retcode)
+
+        return redirect('index')
+
 class UsersAccountListView(LoginRequiredMixin, generic.CreateView):
     model = UserAccount
     fields = ['account_number', 'account_password', 'server']
@@ -101,7 +148,14 @@ class MyAccounts(LoginRequiredMixin, generic.ListView):
         
         print('shoutdown completed successfully')
         return UserAccount.objects.filter(owner=self.request.user)
+    
+class UserAccountDeleteView(LoginRequiredMixin, generic.DeleteView):
+    model = UserAccount
+    success_url = reverse_lazy('myaccounts')
+    template_name = 'useraccount_confirm_delete.html'
 
+    def get_queryset(self):
+        return UserAccount.objects.filter(owner=self.request.user)
     
 
 class CurrencyData(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixin):
@@ -139,230 +193,377 @@ class CurrencyData(LoginRequiredMixin, generic.DetailView, generic.edit.FormMixi
         if form.is_valid():
             currency_pair = form.cleaned_data['currency_pair']
             time_frame = form.cleaned_data['time_frame']
+            make_training = form.cleaned_data.get('make_training', 0)
             self.request.session['currency_pair'] = currency_pair
             self.request.session['time_frame'] = time_frame
-
+            if os.path.isfile(path):
+                self.request.session['make_training'] = make_training
+            else:
+                self.request.session['make_training'] = '0'
             
-            return HttpResponseRedirect('http://127.0.0.1:8000/BHSLFX/botbot')
+        return HttpResponseRedirect('http://127.0.0.1:8000/BHSLFX/botbot')
 
-
-
-
-from dateutil.relativedelta import relativedelta
-import ta
-import numpy as np
-from typing import Tuple
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import pygad.torchga
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import StandardScaler
-import os
 
 directory = 'data'
 os.makedirs(directory, exist_ok=True)
 
-class Bot(generic.CreateView):
+class Bot(LoginRequiredMixin, generic.CreateView):
     model = UserAccount
     template_name = 'bot.html'
 
     def get(self, request):
         currency_pair = request.session.get('currency_pair', None)
         time_frame = request.session.get('time_frame', None)
-        years = 20
-        if time_frame == '16385':
-             years = 11
-        elif time_frame == '30':
-            years = 5
-        elif time_frame == '20':
-            years = 3
-        elif time_frame == '15':
-            years = 2
+        make_training = request.session.get('make_training', None)
 
-        if currency_pair is not None:
-            get_data = pd.DataFrame(mt.copy_rates_range(currency_pair, 
-                               int(time_frame), 
-                               (datetime.datetime.now()-relativedelta(years=years)), 
-                                datetime.datetime.now()))
+        action, output, balance, margin_free = trading_logic(currency_pair, time_frame, make_training)
 
+        time_frame_int = int(time_frame)
 
-            get_data['time'] = pd.to_datetime(get_data['time'], unit='s')
-            get_data['returns'] = (get_data['close'] / get_data['close'].shift(1))-1
-            get_data.fillna(0, inplace=True)
-            df = get_data.drop(['real_volume', 'spread'], axis=1)
+        if time_frame_int == 16385:
+            time_frame_min = 1440
+        elif time_frame_int == 16396:
+            time_frame_min = 720
+        elif time_frame_int == 16392:
+            time_frame_min = 480
+        elif time_frame_int == 16390:
+            time_frame_min = 360
+        elif time_frame_int == 16388:
+            time_frame_min = 240
+        elif time_frame_int == 16386:
+            time_frame_min = 120 
+        elif time_frame_int == 16385:
+            time_frame_min = 60
+        else:
+            time_frame_min = time_frame_int
 
-            df.to_csv('data\instument_data.csv', index=False)
-            
-            context = {'currency_pair': currency_pair, 'time_frame': time_frame}
-            return render(request, self.template_name, context)
+        positions = mt.positions_get()
+        positions_active = positions if positions else []
 
+        context = {
+            'positions_active': positions_active,
+            'currency_pair': currency_pair, 
+            'time_frame': time_frame,
+            'time_frame_min': time_frame_min,
+            'output': output, 
+            'balance': balance, 
+            'margin_free': margin_free,
+            'action': action,
+            }
+        return render(request, self.template_name, context)
+
+def trading_logic(currency_pair, time_frame, make_training):
         
-#     #PyTorch modelis
+    time = time = relativedelta(years = 20)
+    if time_frame == '16385':
+        time = relativedelta(years = 11)
+    elif time_frame == '30':
+        time = relativedelta(years = 5)
+    elif time_frame == '20':
+        time = relativedelta(years = 3)
+    elif time_frame == '15':
+        time = relativedelta(years = 2)
+    elif time_frame == '1':
+        time = relativedelta(months = 1)
+    
+
+    if currency_pair is not None:
+        get_data = pd.DataFrame(mt.copy_rates_range(currency_pair, 
+                            int(time_frame), 
+                            (datetime.datetime.now()-time), 
+                            datetime.datetime.now()))
+
+        get_data['returns'] = (get_data['close'] / get_data['close'].shift(1))-1
+        df = get_data.drop(['real_volume', 'spread', 'time'], axis=1)
+        df.to_csv('data\instument_data.csv', index=False)
+        data = pd.read_csv('data\instument_data.csv')
+        train_size = int(len(data)*0.8)
+        df = pd.DataFrame(data[:train_size])
+        X_test = pd.DataFrame(data[train_size:])
+        
+
+        log_directory = 'logs'
+        os.makedirs(log_directory, exist_ok=True)
+        current_datetime = datetime.datetime.today().strftime("%Y-%m-%d")
+        filename = f"logs/{current_datetime}.txt"
+        logging.basicConfig(filename=filename, encoding="UTF-8", level=logging.CRITICAL, format="%(asctime)s :%(filename)s: %(message)s")
+
+        account_info = mt.account_info()
+        balance = account_info.balance
+        margin_free = account_info.margin_free
+
+        if make_training =='0':
+            ga_instance.run()
+            np.save('data\\best_solution.npy', solution)
+            torch.save(model.state_dict(), 'data\\model.pth')
+
+        if os.path.isfile(path):
+            model.load_state_dict(torch.load('data\model.pth'))
+            p_model = model.eval()
+
+        if os.path.isfile('data\\best_solution.npy'):
+            p_solution = np.load('data\\best_solution.npy')
+
+        print(X_test, "tokia vat")
+        pred = make_predictions(p_model, X_test, p_solution)
+        print(pred)
+        result = pred.detach().numpy()
+        list_result = result.tolist()
+        output = pd.DataFrame(list_result, columns = ['Pikrti', 'Parduoti', 'Laikyti'])
+        output=output.iloc[-1:].to_html(index=False, float_format="%.2f", col_space = 65)
+        output = output.replace('<table', '<table style="margin: 0 auto;text-align:center;"')
+        output = output.replace('<tr', '<tr style="text-align:center"')
+
+        weekno = datetime.datetime.today().weekday()
+        if weekno < 5:
+            if pred[-1, 0] > pred[-1, 1] and pred[-1, 0] > pred[-1, 2] and pred[-1, 0] > 0.4:
+
+                buy_request = {
+                    "action": mt.TRADE_ACTION_DEAL,
+                    "symbol": "currency_pair",
+                    "volume": 0.1,
+                    "type": mt.ORDER_TYPE_BUY,
+                    "price": mt.symbol_info_tick(currency_pair).ask,
+                    "sl": mt.symbol_info_tick(currency_pair).ask * 0.99,
+                    "tp": mt.symbol_info_tick(currency_pair).ask *1.01,
+                    "magic": 234000,
+                    "type_time": mt.ORDER_TIME_DAY,
+                    "type_filling": mt.ORDER_FILLING_FOK,
+                    }
+
+                open_positions = mt.positions_get()
+                if open_positions is None:
+                    logging.critical("No positions found, error code =",mt.last_error())
+                elif len(open_positions)==0:
+                    logging.critical("No positions found")
+                else:
+                    for position in open_positions:
+                        if position.type == mt.ORDER_TYPE_SELL:
+                            close_short_request = {
+                                "action": mt.TRADE_ACTION_DEAL,
+                                "symbol": position.symbol,
+                                "volume": position.volume,
+                                "type": mt.ORDER_TYPE_BUY,
+                                "position": position.ticket,
+                                "magic": position.magic,
+                                "deviation": 20,
+                                "comment": "closing short position",
+                                "type_time": mt.ORDER_TIME_GTC,
+                                "type_filling": mt.ORDER_FILLING_IOC,
+                            }
+                            # result = mt.order_send(close_short_request)
+                        
+                            # if result.retcode != mt.TRADE_RETCODE_DONE:
+                            #     logging.error("order_send failed, retcode={}".format(result.retcode))
+                            # else:
+                            #     logging.error("short position #{} closed.".format(position.ticket))
+
+                if margin_free >= 1000:
+                    # result = mt.order_send(buy_request)
+                    action = "PERKA"
+                    # if result.retcode != mt.TRADE_RETCODE_DONE:
+                    #     logging.error("order_send failed, retcode={}".format(result.retcode))
+                    # else:
+                    #     logging.error("order #{} filled.".format(position.ticket))
+                else:
+                    logging.critical('not sufficient amount of funds for a request')
+
+
+
+            elif pred[-1, 1] > pred[-1, 0] and pred[-1, 1] > pred[-1, 2] and pred[-1, 1] > 0.4:
+
+                sell_request = {
+                "action": mt.TRADE_ACTION_DEAL,
+                "symbol": "currency_pair",
+                "volume": 0.1,
+                "type": mt.ORDER_TYPE_SELL,
+                "price": mt.symbol_info_tick(currency_pair).bid,
+                "sl": mt.symbol_info_tick(currency_pair).ask * 0.99,
+                "tp": mt.symbol_info_tick(currency_pair).ask *1.01,
+                "magic": 234000,
+                "type_time": mt.ORDER_TIME_DAY,
+                "type_filling": mt.ORDER_FILLING_FOK,
+                }
+                open_positions = mt.positions_get()
+                if open_positions is None:
+                    logging.critical("No positions found, error code =",mt.last_error())
+                elif len(open_positions)==0:
+                    logging.critical("No positions found")
+                else:
+                    for position in open_positions:
+                        if position.type == mt.ORDER_TYPE_BUY:
+                            close_long_request = {
+                                "action": mt.TRADE_ACTION_DEAL,
+                                "symbol": position.symbol,
+                                "volume": position.volume,
+                                "type": mt.ORDER_TYPE_SELL,
+                                "position": position.ticket,
+                                "magic": position.magic,
+                                "deviation": 20,
+                                "comment": "closing long position",
+                                "type_time": mt.ORDER_TIME_GTC,
+                                "type_filling": mt.ORDER_FILLING_IOC,
+                            }
+                            # result = mt.order_send(close_long_request)
+                        
+                            # if result.retcode != mt.TRADE_RETCODE_DONE:
+                            #     logging.error("order_send failed, retcode={}".format(result.retcode))
+                            # else:
+                            #     logging.error("long position #{} closed.".format(position.ticket))
+
+                if margin_free >= 1000:
+                    # result = mt.order_send(sell_request)
+                    action = "PARDUODA"
+                    # if result.retcode != mt.TRADE_RETCODE_DONE:
+                    #     logging.error("order_send failed, retcode={}".format(result.retcode))
+                    # else:
+                    #     logging.error("order #{} filled.".format(position.ticket))
+                else:
+                    logging.critical('not sufficient amount of funds for a request')
+
+            else:
+                logging.critical('no actions taken, HOLD')
+                action = "LAIKO"
+        else:
+            action = "Biržos yra uždarytos, gražaus likusio savaitgalio!"
+    
+    return action, output, balance, margin_free
+
+
+data = pd.read_csv('data\instument_data.csv')
+train_size = int(len(data)*0.8)
+df = pd.DataFrame(data[:train_size])
+# X_test = pd.DataFrame(data[train_size:])
+
+
+def fitness_func(ga_instance, solution, sol_idx):
+    global df_copy, buy_treshold, sell_treshold, loss_function, model
+    df_copy = df.copy()
+
+    ema_period = max(int(solution[0]), 1)
+    rsi_period = max(int(solution[1]), 1)
+    buy_treshold = int(solution[2])
+    sell_treshold = int(solution[3])
+
+    df_copy['EMA'] = ta.trend.ema_indicator(df_copy['close'], ema_period)
+    df_copy['RSI'] = ta.momentum.rsi(df_copy['close'], rsi_period)
+    df_copy.fillna(0, inplace=True)
+
+    buy_signals = (df_copy['close'] > df_copy['EMA']) & (df_copy['RSI'] < buy_treshold)
+    sell_signals = (df_copy['RSI'] > sell_treshold)
+    hold_signals = ~(buy_signals | sell_signals)
+    buy_signals = buy_signals & ~hold_signals
+    sell_signals = sell_signals & ~hold_signals
+
+    trades = np.zeros(len(df))
+    trades[buy_signals] = 1
+    trades[sell_signals] = 2
+    trades[hold_signals] = 0
+
+    trades_long = torch.tensor(trades).long()  # Reshaping the tensor
+    inputs = torch.tensor(df_copy[['EMA', 'RSI']].values).float()
+    outputs = model(inputs)
+
+    loss = loss_function(outputs, trades_long)
+
+
+    return -loss.item()
+
+def callback_generation(ga_instance):
+    print("Generation = {generation}".format(generation=ga_instance.generations_completed))
+    print("Fitness    = {fitness}".format(fitness=ga_instance.best_solution()[1]))
+
+
 class GaModel(nn.Module):
     def __init__(self):
         super(GaModel, self).__init__() 
         self.sequential = nn.Sequential(
             nn.Linear(2, 4),
             nn.ReLU(),
-            nn.Linear(4, 1),
-            nn.Tanh()
+            nn.Linear(4, 3),
         )
 
     def forward(self, x):
         return self.sequential(x)
+    
 
 model = GaModel()
 
-# #create an initial population of solutions to the PyTorch model
-initial_population = pygad.torchga.TorchGA(model = model, num_solutions=4)
+loss_function = nn.CrossEntropyLoss()
+
+def predict(model, X_test, best_solution):
+
+    ema_period = max(int(best_solution[0]), 1)
+    rsi_period = max(int(best_solution[1]), 1)
+    buy_treshold = int(best_solution[2])
+    sell_treshold = int(best_solution[3])
+
+    X_test['EMA'] = ta.trend.ema_indicator(X_test['close'], ema_period)
+    X_test['RSI'] = ta.momentum.rsi(X_test['close'], rsi_period)
+    X_test.fillna(0, inplace=True)
+
+    buy_signals = (X_test['close'] > X_test['EMA']) & (X_test['RSI'] < buy_treshold)
+    sell_signals = (X_test['RSI'] > sell_treshold)
+    hold_signals = ~(buy_signals | sell_signals)
+    buy_signals = buy_signals & ~hold_signals
+    sell_signals = sell_signals & ~hold_signals
+
+    trades = np.zeros(len(X_test))
+    trades[buy_signals] = 1
+    trades[sell_signals] = 2
+    trades[hold_signals] = 0
+
+    inputs_test = torch.tensor(X_test[['EMA', 'RSI']].values).float()
+    predictions = model(inputs_test)
+
+    return predictions
 
 
-# def fitness_function(ga_instance, solution: np.ndarray, solution_idx) -> Tuple[float, np.ndarray]:
-
-#     df = pd.read_csv(file_path)
-
-#     ema_period = max(int(solution[0]), 1)
-#     rsi_period = max(int(solution[1]), 1)
-#     buy_treshold = int(solution[2])
-#     sell_treshold = int(solution[3])
-
-#     df['EMA'] = ta.trend.ema_indicator(df['close'], ema_period)
-#     df['RSI'] = ta.momentum.rsi(df['close'], rsi_period)
-    
-#     buy_signals = (df['close'] > df['EMA']) & (df['RSI']<buy_treshold)
-#     sell_signals = (df['RSI']>sell_treshold)
-#     hold_signals = ~(buy_signals | sell_signals)
-#     buy_signals = buy_signals & ~hold_signals
-#     sell_signals = sell_signals & ~hold_signals
+torch_ga = pygad.torchga.TorchGA(model=model,
+                                 num_solutions=4)
 
 
-#     trades = np.zeros(len(df))
-#     trades[buy_signals] = 1
-#     trades[sell_signals] = -1
-#     pnl = (trades * df['returns']).cumsum().iloc[-1]
-
-#     fitness = pnl / df['close'].iloc[0]
-
-#     signals = np.zeros(len(df))
-#     signals[buy_signals] = 1
-#     signals[sell_signals] = -1
-#     signals[hold_signals] = 0
-
-    #prep data for the training and validating
-
-    # scailer = StandardScaler()
-    # X_df = df[['EMA', 'RSI']].values
-    # train_size = int(0.8 * len(X_df))
-
-    # X_train, X_val = X_df[:train_size], X_df[train_size:]
-    # Y_train, Y_val = signals[:train_size], signals[train_size:]
-    
-    # X_train = scailer.fit_transform(X_train)
-    # X_val = scailer.transform(X_val)
-
-
-
-       
-    # return fitness, signals
-
-
-# fitness, signals, X_train, Y_train, X_val, Y_val = fitness_function(solution, df)
-
-# X_train, Y_train = torch.Tensor(X_train), torch.Tensor(Y_train)
-# X_val, Y_val = torch.Tensor(X_val), torch.Tensor(Y_val)
-# signals = torch.Tensor(signals, dtype=torch.float32)
-
-
-# class TradingDataset(Dataset):
-#     def __init__(self, X, Y):
-#         self.X = X
-#         self.Y = Y
-
-#     def __getitem__(self, index):
-#         return self.X[index], self.Y[index]
-
-#     def __len__(self):
-#         return len(self.X)
-        
-# optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-# train_dataset = TradingDataset(X_train, Y_train)
-# batch_size = 32
-# train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
-# def train_function(model, train_loader, val_loader, optimizer, patience=10):
-    
-#         #Loss funkcija
-#     def loss_function(outputs, signals):
-#         trades = torch.cumsum(outputs, dim=0)
-#         returns = torch.cumprod(1 + (trades * signals), dim=0)
-#         roi = returns[-1]
-#         return -roi
-
-#     best_val_loss = float('inf')
-#     for epoch in range(100):
-#         model.train()
-#         for i, (inputs, signals) in enumerate(train_loader):
-#             optimizer.zero_grad()
-#             outputs = model(inputs)
-#             loss = loss_function(outputs, signals)
-#             loss.backward()
-#             optimizer.step()
-
-#         model.eval()
-#         with torch.no_grad():
-#             total_loss = 0
-#             for inputs, signals in val_loader:
-#                 outputs = model(inputs)
-#                 loss = loss_function(outputs, signals)
-#                 total_loss += loss.item() * inputs
-
-#             # Check for early stopping
-#         if total_loss < best_val_loss:
-#             best_val_loss = total_loss
-#             num_epochs_no_improvement = 0
-#         else:
-#             num_epochs_no_improvement += 1
-        
-#         if num_epochs_no_improvement >= patience:
-#             print(f'Validation loss did not improve for {patience} epochs. Stopping early.')
-#             break
-    
-#     return best_val_loss
-
-num_generations = 200 #can vary between 50 - 10 000
-num_parents_mating = 2 #starting point 10 - 20% of the population
-initial_population = np.random.randn(4, 4) #should be equal to the num_solutions parameter 
-sol_per_pop = 4
-num_genes = 4 #the number of parameters to be optimized in the solution
-mutation_percent_genes = 10 #percentage of genes that will be randomly mutated in each offspring
+num_generations = 1 
+num_parents_mating = 2 
+sol_per_pop = 50
+num_genes = 4
+lower_bound = [0, 0, -100, -100]
+upper_bound = [200, 50, 100, 100]
+initial_population = np.random.uniform(lower_bound, upper_bound, (sol_per_pop, num_genes))
+mutation_percent_genes = 50
+mutation_by_replacement=True
 parent_selection_type = 'rws'
 crossover_type = "single_point"
 mutation_type = "random"
-keep_parents = -1
+save_best_solutions = True
 
 
-# ga_instance = pygad.GA(num_generations=num_generations,
-#                     num_parents_mating=num_parents_mating,
-#                     fitness_func=fitness_function,
-#                     sol_per_pop=sol_per_pop,
-#                     num_genes=num_genes,
-#                     mutation_percent_genes=mutation_percent_genes,
-#                     initial_population=initial_population,
-#                     parent_selection_type=parent_selection_type,
-#                     crossover_type=crossover_type,
-#                     mutation_type=mutation_type,
-#                     keep_parents=keep_parents, )
-
-# ga_instance.run()
-
-# ga_instance.plot_fitness(title="PyGAD & PyTorch - Iteration vs. Fitness", linewidth=4) #for algo quality checking
+ga_instance = pygad.GA(num_generations=num_generations, 
+                       num_parents_mating=num_parents_mating,
+                       sol_per_pop=sol_per_pop,
+                       num_genes=num_genes, 
+                       initial_population=initial_population,
+                       fitness_func=fitness_func,
+                       on_generation=callback_generation, 
+                       mutation_percent_genes=mutation_percent_genes,
+                       mutation_by_replacement=mutation_by_replacement,
+                       parent_selection_type=parent_selection_type,
+                       crossover_type = crossover_type,
+                       mutation_type = mutation_type,
+                       save_best_solutions=save_best_solutions)
 
 
-# solution, solution_fitness, solution_idx = ga_instance.best_solution()
+# ga_instance.plot_fitness(title="PyGAD & PyTorch - Iteration vs. Fitness", linewidth=4)
 
-# predictions = pygad.torchga.predict(model=model,
-#                                 solution=solution,
-#                                 data=X_val)
+solution, solution_fitness, solution_idx = ga_instance.best_solution()
 
-# print("Predictions : \n", predictions.detach().numpy())
+print("Fitness value of the best solution = {solution_fitness}".format(solution_fitness=solution_fitness))
+print("Index of the best solution : {solution_idx}".format(solution_idx=solution_idx))
+
+
+
+def make_predictions(model, X_test, solution):
+    predictions = predict(model, X_test, solution)
+    predictions1 = torch.nn.functional.softmax(predictions, dim=1)
+    return predictions1
+

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Paskyros trinimas</h1>
+  <p>Ar tikrai notite ištrinti šią paskyrą?</p>
+  <form method="POST">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Ištrinti</button>
+  </form>
+{% endblock %}

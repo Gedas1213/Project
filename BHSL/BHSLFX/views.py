@@ -50,21 +50,21 @@ SpecialSym =['$', '@', '#', '%']
 @csrf_protect
 def register(request):
     if request.method == "POST":
-        # pasiimame reikšmes iš registracijos formos
+       
         username = request.POST['username']
         email = request.POST['email']
         password = request.POST['password']
         password2 = request.POST['password2']
-        # tikriname, ar sutampa slaptažodžiai
+      
         if password != password2:
             messages.error(request, ('Slaptažodžiai nesutampa!'))
             return redirect('register')
-        # tikriname, ar neužimtas username
+      
         if User.objects.filter(username=username).exists():
             messages.error(
                 request, ('Vartotojo vardas %s užimtas!') % username)
             return redirect('register')
-            # tikriname, ar nėra tokio pat email
+           
         if len(password) < 8:
             messages.error(request, ('Slaptažodis turi būti ne trumpesnis kaip 8 simbolių'))
             return redirect('register')
@@ -85,7 +85,6 @@ def register(request):
             messages.error(
                 request, ('Vartotojas su el. paštu %s jau užregistruotas!') % email)
             return redirect('register')
-            # jeigu viskas tvarkoje, sukuriame naują vartotoją
         User.objects.create_user(
             username=username, email=email, password=password)
         messages.info(
@@ -98,7 +97,7 @@ def close_all_positions(request):
         positions = mt.positions_get() 
 
         if positions is None or len(positions) == 0:
-            logging.critical("No positions found, error code = %s", mt.last_error())
+            logging.error("No positions found, error code = %s", mt.last_error())
         else:
             for position in positions:
                 symbol = position.symbol
@@ -123,7 +122,7 @@ def close_all_positions(request):
                 result = mt.order_send(close_order)
 
                 if result.retcode != mt.TRADE_RETCODE_DONE:
-                    logging.critical("Failed to close position with ticket #:", position.ticket, ". Error code =", result.retcode)
+                    logging.error("Failed to close position with ticket #:", position.ticket, ". Error code =", result.retcode)
 
         return redirect('index')
 
@@ -286,7 +285,7 @@ def trading_logic(currency_pair, time_frame, make_training):
         os.makedirs(log_directory, exist_ok=True)
         current_datetime = datetime.datetime.today().strftime("%Y-%m-%d")
         filename = f"logs/{current_datetime}.txt"
-        logging.basicConfig(filename=filename, encoding="UTF-8", level=logging.CRITICAL, format="%(asctime)s :%(filename)s: %(message)s")
+        logging.basicConfig(filename=filename, encoding="UTF-8", level=logging.ERROR, format="%(asctime)s :%(filename)s: %(message)s")
 
         account_info = mt.account_info()
         balance = account_info.balance
@@ -333,9 +332,9 @@ def trading_logic(currency_pair, time_frame, make_training):
 
                 open_positions = mt.positions_get()
                 if open_positions is None:
-                    logging.critical("No positions found, error code =",mt.last_error())
+                    logging.error("No positions found, error code =",mt.last_error())
                 elif len(open_positions)==0:
-                    logging.critical("No positions found")
+                    logging.error("No positions found")
                 else:
                     for position in open_positions:
                         if position.type == mt.ORDER_TYPE_SELL:
@@ -351,22 +350,29 @@ def trading_logic(currency_pair, time_frame, make_training):
                                 "type_time": mt.ORDER_TIME_GTC,
                                 "type_filling": mt.ORDER_FILLING_IOC,
                             }
-                            # result = mt.order_send(close_short_request)
+                            result = mt.order_send(close_short_request)
                         
-                            # if result.retcode != mt.TRADE_RETCODE_DONE:
-                            #     logging.error("order_send failed, retcode={}".format(result.retcode))
-                            # else:
-                            #     logging.error("short position #{} closed.".format(position.ticket))
+                            if result.retcode != mt.TRADE_RETCODE_DONE:
+                                logging.error("order send failed, retcode={}".format(result.retcode))
+                                action = "Klaida, nepavyko uždayti pozicijų"
+                            else:
+                                order = result.order
+                                logging.error("short position #{} closed.".format(position.ticket))
 
                 if margin_free >= 1000:
-                    # result = mt.order_send(buy_request)
+                    result = mt.order_send(buy_request)
                     action = "PERKA"
-                    # if result.retcode != mt.TRADE_RETCODE_DONE:
-                    #     logging.error("order_send failed, retcode={}".format(result.retcode))
-                    # else:
-                    #     logging.error("order #{} filled.".format(position.ticket))
+                    if result.retcode != mt.TRADE_RETCODE_DONE:
+                        logging.error("order send failed, retcode={}".format(result.retcode))
+                        action = "Klaida, nepavyko įvykdyti užsakymo?"
+                    else:
+                        order = result.order
+                        if hasattr(order, 'ticket'):
+                            logging.error("order #{} filled.".format(order.ticket))
                 else:
-                    logging.critical('not sufficient amount of funds for a request')
+                    logging.error('not sufficient amount of funds for a request')
+                    action = "Per mažas pinigų likutis, papildykite sąskaitą"
+                    order = None
 
 
 
@@ -374,21 +380,21 @@ def trading_logic(currency_pair, time_frame, make_training):
 
                 sell_request = {
                 "action": mt.TRADE_ACTION_DEAL,
-                "symbol": "currency_pair",
+                "symbol": currency_pair,
                 "volume": 0.1,
                 "type": mt.ORDER_TYPE_SELL,
                 "price": mt.symbol_info_tick(currency_pair).bid,
-                "sl": mt.symbol_info_tick(currency_pair).ask * 0.99,
-                "tp": mt.symbol_info_tick(currency_pair).ask *1.01,
+                "sl": mt.symbol_info_tick(currency_pair).ask * 1.01,
+                "tp": mt.symbol_info_tick(currency_pair).ask *0.99,
                 "magic": 234000,
                 "type_time": mt.ORDER_TIME_DAY,
                 "type_filling": mt.ORDER_FILLING_FOK,
                 }
                 open_positions = mt.positions_get()
                 if open_positions is None:
-                    logging.critical("No positions found, error code =",mt.last_error())
+                    logging.error("No positions found, error code =",mt.last_error())
                 elif len(open_positions)==0:
-                    logging.critical("No positions found")
+                    logging.error("No positions found")
                 else:
                     for position in open_positions:
                         if position.type == mt.ORDER_TYPE_BUY:
@@ -404,25 +410,31 @@ def trading_logic(currency_pair, time_frame, make_training):
                                 "type_time": mt.ORDER_TIME_GTC,
                                 "type_filling": mt.ORDER_FILLING_IOC,
                             }
-                            # result = mt.order_send(close_long_request)
+                            result = mt.order_send(close_long_request)
                         
-                            # if result.retcode != mt.TRADE_RETCODE_DONE:
-                            #     logging.error("order_send failed, retcode={}".format(result.retcode))
-                            # else:
-                            #     logging.error("long position #{} closed.".format(position.ticket))
+                            if result.retcode != mt.TRADE_RETCODE_DONE:
+                                logging.error("order_send failed, retcode={}".format(result.retcode))
+                                action = "Klaida, nepavyko uždayti pozicijų"
+                            else:
+                                logging.error("long position #{} closed.".format(position.ticket))
 
                 if margin_free >= 1000:
-                    # result = mt.order_send(sell_request)
+                    result = mt.order_send(sell_request)
                     action = "PARDUODA"
-                    # if result.retcode != mt.TRADE_RETCODE_DONE:
-                    #     logging.error("order_send failed, retcode={}".format(result.retcode))
-                    # else:
-                    #     logging.error("order #{} filled.".format(position.ticket))
+                    if result.retcode != mt.TRADE_RETCODE_DONE:
+                        logging.error("order_send failed, retcode={}".format(result.retcode))
+                        action = "Klaida, nepavyko įvykdyti užsakymo"
+                    else:
+                        order = result.order
+                        if hasattr(order, 'ticket'):
+                            logging.error("order #{} filled.".format(order.ticket))
                 else:
-                    logging.critical('not sufficient amount of funds for a request')
+                    logging.error('not sufficient amount of funds for a request')
+                    action = "Per mažas pinigų likutis, papildykite sąskaitą"
+                    order = None
 
             else:
-                logging.critical('no actions taken, HOLD')
+                logging.error('no actions taken, HOLD')
                 action = "LAIKO"
         else:
             action = "Biržos yra uždarytos, gražaus likusio savaitgalio!"

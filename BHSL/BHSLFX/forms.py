@@ -1,7 +1,9 @@
 from .models import UserAccount
 from django import forms
 import MetaTrader5 as mt
+import os
 
+path = 'data\model.pth'
 
 TIME_GAP_CHOICES = (
     (mt.TIMEFRAME_M1, "1 min"),
@@ -59,4 +61,7 @@ class AccountCreateForm(forms.ModelForm):
 class CurrencyPair(forms.Form):
     currency_pair = forms.ChoiceField(choices=CURRENCY_PAIRS)
     time_frame = forms.ChoiceField(choices=TIME_GAP_CHOICES)
-    make_training = forms.ChoiceField(choices=TRAINING_TRUE)
+    if os.path.isfile(path) is None:
+        pass
+    else:
+        make_training = forms.ChoiceField(choices=TRAINING_TRUE)
